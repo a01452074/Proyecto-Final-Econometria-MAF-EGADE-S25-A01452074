@@ -1,0 +1,536 @@
+---
+title: "Proyecto Final Econometría"
+author: "Melissa Arizoca Longoria"
+date: "2026-03-18"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+#Este script tiene como objetivo analizar el comportamiento de distintas acciones financieras mediante la aplicación de modelos de regresión lineal y técnicas de series de tiempo. Se estudian relaciones entre activos de los sectores bancario, tecnológico y energético, incluyendo empresas como JPM, BAC, CITI, WFC, SAN, MS, AMAT, LRCX, TSM, NVIDIA, STLA, XOM, VLO y SHEL.
+
+#El análisis se realiza utilizando rendimientos logarítmicos y distintas frecuencias de datos, con el fin de evaluar la dinámica entre variables y la estabilidad de los modelos. Asimismo, se incorporan pruebas econométricas y herramientas de visualización para validar los supuestos del modelo y apoyar la interpretación de los resultados.
+
+#Paso 1 : Cargar librerías
+
+
+```{r}
+packages <- c("readxl", "tidyverse", "lubridate", "car", "lmtest", "sandwich", "corrplot")
+
+installed <- packages %in% installed.packages()[,"Package"]
+
+if(any(!installed)){
+  install.packages(packages[!installed])
+}
+
+lapply(packages, library, character.only = TRUE)
+```
+
+
+#Paso 2 : Cargar archivos descargados de Refinitiv
+
+
+```{r}
+process_data <- function(files, names, date_format = "datetime") {
+  
+  data_list <- map2(files, names, function(file, name){
+    
+    df <- read_excel(file)
+    
+    df <- df %>%
+      select(`Exchange Date`, Close) %>%
+      rename(Date = `Exchange Date`,
+             Price = Close) %>%
+      mutate(
+        Date = if(date_format == "datetime") as.POSIXct(Date) else as.Date(Date),
+        Price = as.numeric(Price)
+      ) %>%
+      arrange(Date) %>%
+      rename(!!name := Price)
+    
+    return(df)
+  })
+  
+  merged <- reduce(data_list, full_join, by = "Date")
+  
+  returns <- merged %>%
+    arrange(Date) %>%
+    mutate(across(where(is.numeric),
+                  ~ ifelse(.x > 0 & lag(.x) > 0,
+                           log(.x / lag(.x)),
+                           NA))) %>%
+    drop_na()
+  
+  return(returns)
+}
+```
+
+
+#PASO 3: ARCHIVOS (5 MIN)
+
+
+```{r}
+# Modelo bancario
+bank_files_5 <- c("JPM5min030126_031526.xlsx",
+                  "BAC5min030126_031526.xlsx",
+                  "CITI5min030126_031526.xlsx",
+                  "WFC5min030126_031526.xlsx",
+                  "SAN5min030126_031526.xlsx",
+                  "MS5min030126_031526.xlsx")
+
+bank_names <- c("JPM","BAC","CITI","WFC","SAN","MS")
+
+# Semiconductores
+semi_files_5 <- c("AMAT5min030126_031526.xlsx",
+                  "LRCX5min030126_031526.xlsx",
+                  "TSM5min030126_031526.xlsx")
+
+semi_names <- c("AMAT","LRCX","TSM")
+
+# Energía
+energy_files_5 <- c("NVDA5min030126_031526.xlsx",
+                    "STLA5min030126_031526.xlsx",
+                    "XOM5min030126_031526.xlsx",
+                    "VLO5min030126_031526.xlsx",
+                    "SHEL5min030126_031526.xlsx")
+
+energy_names <- c("NVDA","STLA","XOM","VLO","SHEL")
+```
+
+
+#PASO 4: GENERAR DATASETS (5 MIN)
+
+
+```{r}
+bank_5 <- process_data(bank_files_5, bank_names, "datetime")
+head(bank_5)
+summary(bank_5)
+```
+
+
+```{r}
+semi_5   <- process_data(semi_files_5, semi_names, "datetime")
+head(semi_5)
+summary(semi_5)
+```
+
+
+```{r}
+energy_5 <- process_data(energy_files_5, energy_names, "datetime")
+head(energy_5)
+summary(energy_5)
+```
+
+
+#PASO 5: MODELOS (5 MIN)
+
+
+```{r}
+# Modelo 1: Bancario
+model_bank_5 <- lm(JPM ~ BAC + CITI + WFC + SAN + MS, data = bank_5)
+
+# Modelo 2: Semiconductores
+model_semi_5 <- lm(AMAT ~ LRCX + TSM, data = semi_5)
+
+# Modelo 3: Energía / Autos
+model_energy_5 <- lm(NVDA ~ STLA + XOM + VLO + SHEL, data = energy_5)
+```
+
+
+#PASO 6: RESULTADOS
+
+
+```{r}
+summary(model_bank_5)
+summary(model_semi_5)
+summary(model_energy_5)
+```
+
+
+#PASO 7: DIAGNÓSTICOS COMPLETOS
+
+
+#Modelo Bancario
+
+```{r}
+# Multicolinealidad
+vif(model_bank_5)
+
+# Autocorrelación
+durbinWatsonTest(model_bank_5)
+bgtest(model_bank_5)
+
+# Heterocedasticidad
+bptest(model_bank_5)
+gqtest(model_bank_5)
+
+# Errores robustos
+coeftest(model_bank_5, vcov = vcovHC(model_bank_5, type = "HC1"))
+```
+
+
+#Modelo Semiconductores
+
+
+```{r}
+vif(model_semi_5)
+
+durbinWatsonTest(model_semi_5)
+bgtest(model_semi_5)
+
+bptest(model_semi_5)
+gqtest(model_semi_5)
+
+coeftest(model_semi_5, vcov = vcovHC(model_semi_5, type = "HC1"))
+```
+
+
+#Modelo Energía
+
+
+```{r}
+vif(model_energy_5)
+
+durbinWatsonTest(model_energy_5)
+bgtest(model_energy_5)
+
+bptest(model_energy_5)
+gqtest(model_energy_5)
+
+coeftest(model_energy_5, vcov = vcovHC(model_energy_5, type = "HC1"))
+```
+
+
+#PASO 8: GRÁFICAS
+
+
+#Modelo Bancario
+
+```{r}
+# Residuos vs fitted
+plot(fitted(model_bank_5), residuals(model_bank_5),
+     main = "Residuos vs Fitted (Bank)",
+     xlab = "Fitted", ylab = "Residuos")
+abline(h = 0, col = "red")
+
+# QQ plot
+qqnorm(residuals(model_bank_5))
+qqline(residuals(model_bank_5), col = "red")
+```
+
+
+#Modelo Semiconductores
+
+
+```{r}
+plot(fitted(model_semi_5), residuals(model_semi_5))
+abline(h = 0, col = "red")
+
+qqnorm(residuals(model_semi_5))
+qqline(residuals(model_semi_5), col = "red")
+```
+
+
+#Modelo Energía
+
+
+```{r}
+plot(fitted(model_energy_5), residuals(model_energy_5))
+abline(h = 0, col = "red")
+
+qqnorm(residuals(model_energy_5))
+qqline(residuals(model_energy_5), col = "red")
+```
+
+
+#PASO 9: MATRIZ DE CORRELACIÓN
+
+
+```{r}
+# Bancario
+cor_bank <- cor(bank_5 %>% select(-Date))
+corrplot(cor_bank, method = "color")
+
+# Semiconductores
+cor_semi <- cor(semi_5 %>% select(-Date))
+corrplot(cor_semi, method = "color")
+
+# Energía
+cor_energy <- cor(energy_5 %>% select(-Date))
+corrplot(cor_energy, method = "color")
+```
+
+
+##PARTE 1: CÓDIGO DAILY (6 MESES)
+
+
+#Definir archivos DAILY:
+
+
+```{r}
+# =========================
+# ARCHIVOS DAILY (6 MESES)
+# =========================
+
+# Bancario
+bank_files_d <- c("JPMDaily6Months.xlsx",
+                  "BACDaily6Months.xlsx",
+                  "CITIDaily6Months.xlsx",
+                  "WFCDaily6Months.xlsx",
+                  "SANDaily6Months.xlsx",
+                  "MSDaily6Months.xlsx")
+
+# Semiconductores
+semi_files_d <- c("AMATDaily6Months.xlsx",
+                  "LRCXDaily6Months.xlsx",
+                  "TSMDaily6Months.xlsx")
+
+# Energía
+energy_files_d <- c("NVDADaily6Months.xlsx",
+                    "STLADaily6Months.xlsx",
+                    "XOMDaily6Months.xlsx",
+                    "VLODaily6Months.xlsx",
+                    "SHELDaily6Months.xlsx")
+```
+
+
+#PASO 1: GENERAR DATASETS DAILY
+
+
+```{r}
+# Bancario
+bank_d   <- process_data(bank_files_d, bank_names, "date")
+
+# Semiconductores
+semi_d   <- process_data(semi_files_d, semi_names, "date")
+
+# Energía
+energy_d <- process_data(energy_files_d, energy_names, "date")
+```
+
+
+
+#PASO 2: MODELOS DAILY
+
+
+```{r}
+# Modelo 1: Bancario
+model_bank_d <- lm(JPM ~ BAC + CITI + WFC + SAN + MS, data = bank_d)
+
+# Modelo 2: Semiconductores
+model_semi_d <- lm(AMAT ~ LRCX + TSM, data = semi_d)
+
+# Modelo 3: Energía
+model_energy_d <- lm(NVDA ~ STLA + XOM + VLO + SHEL, data = energy_d)
+```
+
+
+#PASO 3: RESULTADOS
+
+
+```{r}
+summary(model_bank_d)
+summary(model_semi_d)
+summary(model_energy_d)
+```
+
+
+#Validación de Supuestos del Modelo – Datos Diarios
+
+
+#Multicolinealidad
+
+
+```{r}
+# Bancario
+vif(model_bank_d)
+
+# Semiconductores
+vif(model_semi_d)
+
+# Energía
+vif(model_energy_d)
+```
+
+
+#Autocorrelación
+
+
+```{r}
+# Bancario
+durbinWatsonTest(model_bank_d)
+bgtest(model_bank_d)
+
+# Semiconductores
+durbinWatsonTest(model_semi_d)
+bgtest(model_semi_d)
+
+# Energía
+durbinWatsonTest(model_energy_d)
+bgtest(model_energy_d)
+```
+
+
+#Heterocedasticidad
+
+
+```{r}
+# Bancario
+bptest(model_bank_d)
+gqtest(model_bank_d)
+
+# Semiconductores
+bptest(model_semi_d)
+gqtest(model_semi_d)
+
+# Energía
+bptest(model_energy_d)
+gqtest(model_energy_d)
+```
+
+
+#Errores Robustos
+
+
+```{r}
+# Bancario
+coeftest(model_bank_d, vcov = vcovHC(model_bank_d, type = "HC1"))
+
+# Semiconductores
+coeftest(model_semi_d, vcov = vcovHC(model_semi_d, type = "HC1"))
+
+# Energía
+coeftest(model_energy_d, vcov = vcovHC(model_energy_d, type = "HC1"))
+```
+
+
+#En esta sección se evalúan los supuestos clásicos del modelo de regresión lineal utilizando los modelos estimados con datos diarios, con el fin de validar la consistencia y confiabilidad de los resultados.
+
+
+#Análisis de Residuos (Gráficas)
+
+
+```{r}
+# =========================
+# BANCARIO
+# =========================
+plot(fitted(model_bank_d), residuals(model_bank_d),
+     main = "Residuos vs Fitted (Bank Daily)",
+     xlab = "Fitted", ylab = "Residuos")
+abline(h = 0, col = "red")
+
+qqnorm(residuals(model_bank_d))
+qqline(residuals(model_bank_d), col = "red")
+
+
+# =========================
+# SEMICONDUCTORES
+# =========================
+plot(fitted(model_semi_d), residuals(model_semi_d),
+     main = "Residuos vs Fitted (Semi Daily)",
+     xlab = "Fitted", ylab = "Residuos")
+abline(h = 0, col = "red")
+
+qqnorm(residuals(model_semi_d))
+qqline(residuals(model_semi_d), col = "red")
+
+
+# =========================
+# ENERGÍA
+# =========================
+plot(fitted(model_energy_d), residuals(model_energy_d),
+     main = "Residuos vs Fitted (Energy Daily)",
+     xlab = "Fitted", ylab = "Residuos")
+abline(h = 0, col = "red")
+
+qqnorm(residuals(model_energy_d))
+qqline(residuals(model_energy_d), col = "red")
+```
+
+
+```{r}
+hist(residuals(model_bank_d), main = "Histograma Residuos Bank")
+```
+
+
+```{r}
+hist(residuals(model_semi_d), main = "Histograma Residuos Semi")
+```
+
+
+```{r}
+hist(residuals(model_energy_d), main = "Histograma Residuos Energy")
+```
+
+
+#Regresiones Lineales Simples
+
+```{r}
+library(readxl)
+
+jpm  <- read_excel("JPMDaily6Months.xlsx")
+bac  <- read_excel("BACDaily6Months.xlsx")
+citi <- read_excel("CITIDaily6Months.xlsx")
+wfc  <- read_excel("WFCDaily6Months.xlsx")
+san  <- read_excel("SANDaily6Months.xlsx")
+ms   <- read_excel("MSDaily6Months.xlsx")
+
+# =========================
+# HACER MISMO TAMAÑO
+# =========================
+min_len <- min(
+  nrow(jpm),
+  nrow(bac),
+  nrow(citi),
+  nrow(wfc),
+  nrow(san),
+  nrow(ms)
+)
+
+# =========================
+# CREAR DATASET
+# =========================
+data <- data.frame(
+  JPM  = as.numeric(jpm$Close[1:min_len]),
+  BAC  = as.numeric(bac$Close[1:min_len]),
+  CITI = as.numeric(citi$Close[1:min_len]),
+  WFC  = as.numeric(wfc$Close[1:min_len]),
+  SAN  = as.numeric(san$Close[1:min_len]),
+  MS   = as.numeric(ms$Close[1:min_len])
+)
+
+# =========================
+# LIMPIAR
+# =========================
+data <- na.omit(data)
+
+# =========================
+# MODELOS
+# =========================
+model_bac  <- lm(JPM ~ BAC, data = data)
+model_citi <- lm(JPM ~ CITI, data = data)
+model_wfc  <- lm(JPM ~ WFC, data = data)
+model_san  <- lm(JPM ~ SAN, data = data)
+model_ms   <- lm(JPM ~ MS, data = data)
+
+summary(model_bac)
+summary(model_citi)
+summary(model_wfc)
+summary(model_san)
+summary(model_ms)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
